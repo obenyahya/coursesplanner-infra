@@ -1,0 +1,45 @@
+# --- Terraform : cache local ---
+.terraform/
+# Providers et modules téléchargés par `init`. Se régénère, et pèse lourd.
+
+# --- Terraform : state ---
+*.tfstate
+*.tfstate.*
+# Le state peut contenir des secrets en clair (mots de passe DB, clés).
+# `*.tfstate.*` couvre les sauvegardes, comme terraform.tfstate.backup.
+
+# --- Terraform : plans enregistrés ---
+*.tfplan
+tfplan
+# Fichiers produits par `plan -out=...`. Ils contiennent aussi des valeurs sensibles.
+
+# --- Terraform : logs de crash ---
+crash.log
+crash.*.log
+
+# --- Terraform : fichiers d'override locaux ---
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Pour surcharger localement une config sans l'imposer aux autres.
+
+# --- Terraform : config CLI personnelle ---
+.terraformrc
+terraform.rc
+# Peut contenir des tokens d'accès.
+
+# --- Variables sensibles ---
+*.secret.tfvars
+# Si un jour tu as besoin d'un fichier de variables secrètes local.
+
+# --- Identifiants GCP ---
+*-sa-key.json
+credentials*.json
+# Au cas où une clé de compte de service traînerait dans le repo.
+
+# --- Divers ---
+.env
+.DS_Store
+.vscode/
+.idea/
