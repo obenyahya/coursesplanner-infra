@@ -1,0 +1,5 @@
+project_id      = "coursesplanner-staging-509419"
+region          = "europe-west9"
+environment     = "staging"
+folder_id       = "204081832980"
+billing_account = "011C2B-EE7E18-0633E4"

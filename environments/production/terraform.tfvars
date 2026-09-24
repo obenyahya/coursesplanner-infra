@@ -1,0 +1,5 @@
+project_id      = "coursesplanner-prod"
+region          = "europe-west9"
+environment     = "prduction"
+folder_id       = "675616086897"
+billing_account = "011C2B-EE7E18-0633E4"

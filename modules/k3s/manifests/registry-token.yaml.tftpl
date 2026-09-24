@@ -1,0 +1,111 @@
+# Rafraîchit le Secret "artifact-registry" avec un jeton OAuth court (~1 h) du compte
+# de service de la VM : aucune clé JSON longue durée n'est stockée dans le cluster.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: registry-token-refresher
+  namespace: ${namespace}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: registry-token-refresher
+  namespace: ${namespace}
+rules:
+  # "create" ne peut pas être restreint par resourceNames : le nom n'existe pas encore
+  # au moment de la vérification des droits, Kubernetes l'ignore donc pour ce verbe.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["artifact-registry"]
+    verbs: ["get", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: registry-token-refresher
+  namespace: ${namespace}
+subjects:
+  - kind: ServiceAccount
+    name: registry-token-refresher
+    namespace: ${namespace}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: registry-token-refresher
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: registry-token
+  namespace: ${namespace}
+spec:
+  # Le jeton vit ~60 min : un rafraîchissement toutes les 30 min laisse une marge
+  # même si une exécution échoue.
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 120
+      template:
+        spec:
+          serviceAccountName: registry-token-refresher
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534 # nobody : l'image tourne en root par défaut, inutile ici
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: refresh
+              # alpine/k8s : kubectl + curl + jq sur Alpine, maintenu et publié à chaque
+              # version de Kubernetes. Version de kubectl proche de celle de k3s (écart ±1 toléré).
+              image: alpine/k8s:1.36.4
+              env:
+                - name: HOME # kubectl écrit son cache dans $HOME, seul /tmp est inscriptible
+                  value: /tmp
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -eu
+                  # Jeton du compte de service de la VM, fourni par le serveur de métadonnées GCE
+                  TOKEN=$(curl -sSf -H "Metadata-Flavor: Google" \
+                    http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token \
+                    | jq -er .access_token)
+
+                  # Génération puis apply : crée le Secret s'il manque, le met à jour sinon
+                  kubectl create secret docker-registry artifact-registry \
+                    --namespace ${namespace} \
+                    --docker-server=${registry_host} \
+                    --docker-username=oauth2accesstoken \
+                    --docker-password="$TOKEN" \
+                    --dry-run=client -o yaml > /tmp/secret.yaml
+                  kubectl apply -f /tmp/secret.yaml
+                  echo "Secret artifact-registry rafraîchi"
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            # En RAM : le jeton écrit dans /tmp ne touche jamais le disque du nœud
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 8Mi

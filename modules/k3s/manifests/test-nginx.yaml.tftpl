@@ -1,0 +1,49 @@
+# Application de test : valide que le cluster sait tirer une image privée d'Artifact Registry
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-nginx
+  namespace: ${namespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test-nginx
+  template:
+    metadata:
+      labels:
+        app: test-nginx
+    spec:
+      # nginx n'appelle pas l'API Kubernetes : pas besoin de lui monter un jeton
+      automountServiceAccountToken: false
+      # Identifiants fournis à containerd pour le pull (Secret entretenu par le CronJob)
+      imagePullSecrets:
+        - name: artifact-registry
+      containers:
+        - name: nginx
+          image: ${image}
+          ports:
+            - name: http
+              containerPort: 80
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+# Adresse stable (DNS test-nginx.${namespace}.svc) devant le pod, accessible seulement dans le cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: test-nginx
+  namespace: ${namespace}
+spec:
+  type: ClusterIP
+  selector:
+    app: test-nginx
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
