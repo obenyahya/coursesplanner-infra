@@ -4,13 +4,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: registry-token-refresher
-  namespace: ${namespace}
+  namespace: coursesplanner
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: registry-token-refresher
-  namespace: ${namespace}
+  namespace: coursesplanner
 rules:
   # "create" ne peut pas être restreint par resourceNames : le nom n'existe pas encore
   # au moment de la vérification des droits, Kubernetes l'ignore donc pour ce verbe.
@@ -26,11 +26,11 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: registry-token-refresher
-  namespace: ${namespace}
+  namespace: coursesplanner
 subjects:
   - kind: ServiceAccount
     name: registry-token-refresher
-    namespace: ${namespace}
+    namespace: coursesplanner
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -40,7 +40,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: registry-token
-  namespace: ${namespace}
+  namespace: coursesplanner
 spec:
   # Le jeton vit ~60 min : un rafraîchissement toutes les 30 min laisse une marge
   # même si une exécution échoue.
@@ -81,8 +81,8 @@ spec:
 
                   # Génération puis apply : crée le Secret s'il manque, le met à jour sinon
                   kubectl create secret docker-registry artifact-registry \
-                    --namespace ${namespace} \
-                    --docker-server=${registry_host} \
+                    --namespace coursesplanner \
+                    --docker-server=europe-west9-docker.pkg.dev \
                     --docker-username=oauth2accesstoken \
                     --docker-password="$TOKEN" \
                     --dry-run=client -o yaml > /tmp/secret.yaml

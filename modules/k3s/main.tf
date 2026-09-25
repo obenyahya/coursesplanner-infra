@@ -63,31 +63,6 @@ resource "google_project_iam_member" "monitoring" {
 }
 
 # ---------------------------------------------------------------
-# Manifests de plateforme, déposés par startup.sh dans le dossier
-# d'auto-déploiement de k3s : pas besoin de kubectl ni de tunnel
-# ---------------------------------------------------------------
-locals {
-  platform_manifests = join("\n---\n", concat(
-    [
-      templatefile("${path.module}/manifests/namespace.yaml.tftpl", {
-        namespace = var.app_namespace
-      }),
-      templatefile("${path.module}/manifests/registry-token.yaml.tftpl", {
-        namespace     = var.app_namespace
-        registry_host = var.registry_host
-      }),
-    ],
-    # Application de test optionnelle : absente des environnements qui n'en veulent pas
-    var.test_image == "" ? [] : [
-      templatefile("${path.module}/manifests/test-nginx.yaml.tftpl", {
-        namespace = var.app_namespace
-        image     = var.test_image
-      }),
-    ],
-  ))
-}
-
-# ---------------------------------------------------------------
 # La VM : un cluster k3s à un seul nœud
 # ---------------------------------------------------------------
 resource "google_compute_instance" "this" {
@@ -126,8 +101,6 @@ resource "google_compute_instance" "this" {
   metadata = {
     enable-oslogin = "TRUE"
     startup-script = file("${path.module}/startup.sh")
-    # Lu par startup.sh ; une clé de metadata se met à jour sans recréer la VM
-    k3s-platform-manifests = local.platform_manifests
   }
 
   allow_stopping_for_update = true

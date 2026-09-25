@@ -21,11 +21,6 @@ module "k3s" {
   machine_type = "t2d-standard-1"
   network_id   = module.network.network_id
   subnet_id    = module.network.subnet_id
-
-  # Manifests de plateforme livrés au cluster par Terraform
-  app_namespace = "coursesplanner"
-  registry_host = "europe-west9-docker.pkg.dev"
-  test_image    = "europe-west9-docker.pkg.dev/coursesplanner-infra/apps/test-nginx:v1"
 }
 
 output "k3s_ip" {

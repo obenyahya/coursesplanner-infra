@@ -1,0 +1,5 @@
+# Applications déployées dans le namespace créé par platform/
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - test-nginx.yaml

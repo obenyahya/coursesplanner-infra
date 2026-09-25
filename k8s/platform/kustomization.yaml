@@ -1,0 +1,6 @@
+# Socle commun à tous les clusters : ce que les applications supposent déjà présent
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - registry-token.yaml

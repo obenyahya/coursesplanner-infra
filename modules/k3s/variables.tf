@@ -39,21 +39,3 @@ variable "subnet_id" {
   description = "Sous-réseau de la VM"
   type        = string
 }
-
-variable "app_namespace" {
-  description = "Namespace Kubernetes de l'application (manifests de plateforme)"
-  type        = string
-  default     = "coursesplanner"
-}
-
-variable "registry_host" {
-  description = "Hôte Artifact Registry pour lequel le Secret de pull est généré"
-  type        = string
-  default     = "europe-west9-docker.pkg.dev"
-}
-
-variable "test_image" {
-  description = "Image complète de l'application de test ; vide = test-nginx n'est pas déployé"
-  type        = string
-  default     = ""
-}

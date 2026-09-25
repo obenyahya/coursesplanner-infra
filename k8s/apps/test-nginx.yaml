@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: test-nginx
-  namespace: ${namespace}
+  namespace: coursesplanner
 spec:
   replicas: 1
   selector:
@@ -21,7 +21,7 @@ spec:
         - name: artifact-registry
       containers:
         - name: nginx
-          image: ${image}
+          image: europe-west9-docker.pkg.dev/coursesplanner-infra/apps/test-nginx:v1
           ports:
             - name: http
               containerPort: 80
@@ -33,12 +33,12 @@ spec:
               cpu: 100m
               memory: 64Mi
 ---
-# Adresse stable (DNS test-nginx.${namespace}.svc) devant le pod, accessible seulement dans le cluster
+# Adresse stable (DNS test-nginx.coursesplanner.svc) devant le pod, accessible seulement dans le cluster
 apiVersion: v1
 kind: Service
 metadata:
   name: test-nginx
-  namespace: ${namespace}
+  namespace: coursesplanner
 spec:
   type: ClusterIP
   selector:

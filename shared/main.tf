@@ -36,3 +36,27 @@ module "registry" {
   # Le dépôt ne peut pas être créé tant que l'API n'est pas active
   depends_on = [google_project_service.artifactregistry]
 }
+
+# API nécessaires à Workload Identity Federation :
+# sts échange le jeton GitHub, iamcredentials délivre le jeton du compte de service
+resource "google_project_service" "ci" {
+  for_each = toset([
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "sts.googleapis.com",
+  ])
+  service            = each.value
+  disable_on_destroy = false
+}
+
+module "ci_cd" {
+  source = "../modules/ci-cd"
+
+  project_id        = var.project_id
+  github_repository = "obenyahya/coursesplanner-docker"
+  # Sorties du module registry : droit limité à ce dépôt, créé avant lui
+  registry_location      = module.registry.location
+  registry_repository_id = module.registry.repository_id
+
+  depends_on = [google_project_service.ci]
+}
