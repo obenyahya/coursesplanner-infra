@@ -21,6 +21,13 @@ module "k3s" {
   machine_type = "t2d-standard-1"
   network_id   = module.network.network_id
   subnet_id    = module.network.subnet_id
+
+  environment  = "prod"
+  app_branch   = "main"
+  app_repo_url = "ssh://git@github.com/obenyahya/coursesplanner-docker"
+  flux_version = "2.9.5"
+
+  depends_on = [module.project] # l'API secretmanager doit être active
 }
 
 output "k3s_ip" {

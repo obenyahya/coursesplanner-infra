@@ -31,5 +31,6 @@ module "project" {
     "compute.googleapis.com",
     "iam.googleapis.com",
     "iap.googleapis.com",
+    "secretmanager.googleapis.com",
   ]
 }

@@ -1,0 +1,35 @@
+# Flux ne surveille que k8s/ du dépôt applicatif, sur la branche de l'environnement.
+# Accès SSH en lecture seule : Secret coursesplanner-app-deploy-key, écrit par startup.sh
+# à partir de Secret Manager.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: coursesplanner-docker
+  namespace: flux-system
+spec:
+  interval: 1m
+  url: ${app_repo_url}
+  ref:
+    branch: ${app_branch}
+  secretRef:
+    name: coursesplanner-app-deploy-key
+  # Tout ignorer sauf k8s/ : un commit sur le code des services ne déclenche rien
+  ignore: |
+    /*
+    !/k8s/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: coursesplanner
+  namespace: flux-system
+spec:
+  interval: 5m
+  path: ./k8s/overlays/${environment}
+  # Un objet supprimé du dépôt est aussi supprimé du cluster : Git reste la seule vérité.
+  # Pas de dependsOn : la plateforme (namespace, External Secrets, CronJob) n'est pas
+  # gérée par Flux mais par l'auto-déploiement k3s, déjà en place au démarrage.
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: coursesplanner-docker

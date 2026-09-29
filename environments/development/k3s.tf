@@ -11,6 +11,10 @@ module "network" {
 }
 
 # Cluster k3s (1 VM = 1 nœud)
+locals {
+  k3s_environment = "dev"
+}
+
 module "k3s" {
   source = "../../modules/k3s"
 
@@ -18,9 +22,22 @@ module "k3s" {
   region       = var.region
   zone         = "${var.region}-a"
   name         = "k3s-dev"
-  machine_type = "t2d-standard-1"
+  machine_type = "t2d-standard-2"
   network_id   = module.network.network_id
   subnet_id    = module.network.subnet_id
+  internal_ip  = "10.10.0.2" # IP déjà attribuée à la VM, désormais réservée
+  public_web   = false       # dev : accès uniquement par tunnel IAP
+
+  data_disk_size_gb       = var.data_disk_size_gb
+  persistent_volume_sizes = var.persistent_volume_sizes
+
+  environment  = local.k3s_environment
+  node_name    = coalesce(var.k3s_node_name, "k3s-${local.k3s_environment}")
+  app_branch   = "develop"
+  app_repo_url = "ssh://git@github.com/obenyahya/coursesplanner-docker"
+  flux_version = "2.9.5"
+
+  depends_on = [module.project] # l'API secretmanager doit être active
 }
 
 output "k3s_ip" {
