@@ -100,6 +100,29 @@ variable "public_web" {
   default     = true
 }
 
+variable "expose_http_via_cloudflare" {
+  description = "Ouvre le port 80 aux seules plages IP de Cloudflare (cloudflare_ipv4_ranges)"
+  type        = bool
+  default     = false
+}
+
+variable "expose_https_via_cloudflare" {
+  description = "Ouvre le port 443 aux seules plages IP de Cloudflare (cloudflare_ipv4_ranges), pour le SSL « Full »"
+  type        = bool
+  default     = false
+}
+
+variable "cloudflare_ipv4_ranges" {
+  description = "Plages IPv4 de Cloudflare autorisées sur le port 80 et/ou 443 si expose_http_via_cloudflare / expose_https_via_cloudflare"
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for r in var.cloudflare_ipv4_ranges : can(cidrnetmask(r))])
+    error_message = "cloudflare_ipv4_ranges ne doit contenir que des CIDR IPv4."
+  }
+}
+
 variable "data_disk_size_gb" {
   description = "Taille du disque de données persistant (monté sur /mnt/data) en Go"
   type        = number

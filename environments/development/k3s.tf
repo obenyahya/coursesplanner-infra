@@ -10,6 +10,28 @@ module "network" {
   depends_on = [module.project] # l'API compute doit être active
 }
 
+# Plages IPv4 de Cloudflare, lues à chaque plan (pas de provider Cloudflare ni de token)
+data "http" "cloudflare_ipv4" {
+  count = local.cloudflare_enabled ? 1 : 0
+
+  url = "https://www.cloudflare.com/ips-v4"
+
+  lifecycle {
+    postcondition {
+      condition     = self.status_code == 200
+      error_message = "Impossible de récupérer https://www.cloudflare.com/ips-v4 (HTTP ${self.status_code})."
+    }
+  }
+}
+
+locals {
+  cloudflare_enabled = var.expose_http_via_cloudflare || var.expose_https_via_cloudflare
+  cloudflare_ipv4_ranges = local.cloudflare_enabled ? [
+    for line in split("\n", data.http.cloudflare_ipv4[0].response_body) : trimspace(line)
+    if trimspace(line) != ""
+  ] : []
+}
+
 # Cluster k3s (1 VM = 1 nœud)
 locals {
   k3s_environment = "dev"
@@ -26,7 +48,12 @@ module "k3s" {
   network_id   = module.network.network_id
   subnet_id    = module.network.subnet_id
   internal_ip  = "10.10.0.2" # IP déjà attribuée à la VM, désormais réservée
-  public_web   = false       # dev : accès uniquement par tunnel IAP
+  public_web   = false       # dev : pas d'ouverture à tout Internet
+
+  # dev derrière Cloudflare (SSL Flexible) : port 80 ouvert aux seules IP Cloudflare
+  expose_http_via_cloudflare  = var.expose_http_via_cloudflare
+  expose_https_via_cloudflare = var.expose_https_via_cloudflare
+  cloudflare_ipv4_ranges      = local.cloudflare_ipv4_ranges
 
   data_disk_size_gb       = var.data_disk_size_gb
   persistent_volume_sizes = var.persistent_volume_sizes

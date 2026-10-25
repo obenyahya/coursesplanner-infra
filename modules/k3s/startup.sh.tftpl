@@ -108,7 +108,8 @@ EOF
 
 # ---------------------------------------------------------------
 # 2. Config k3s : nom et IP du nœud fixés (indépendants du hostname renvoyé par GCP),
-#    Traefik désactivé, Secrets chiffrés au repos, credential provider.
+#    Traefik désactivé, Secrets chiffrés au repos, credential provider,
+#    nettoyage des images inutilisées (dès 70 % de disque, ou après 7 jours sans usage).
 #    k3s redémarré seulement si une config a changé et qu'il est déjà installé.
 # ---------------------------------------------------------------
 K3S_CONFIG=/etc/rancher/k3s/config.yaml
@@ -125,6 +126,9 @@ secrets-encryption: true
 kubelet-arg:
   - image-credential-provider-config=$CP_CONFIG
   - image-credential-provider-bin-dir=$CP_BIN_DIR
+  - image-gc-high-threshold=70
+  - image-gc-low-threshold=50
+  - image-maximum-gc-age=168h
 EOF
 
 if $RESTART_K3S && command -v k3s >/dev/null 2>&1; then

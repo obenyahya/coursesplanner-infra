@@ -24,6 +24,55 @@ moved {
   to   = google_compute_firewall.allow_web[0]
 }
 
+# HTTP (80) uniquement depuis Cloudflare : utile seulement en SSL « Flexible »
+# (Cloudflare → origine en HTTP) ; à fermer en SSL « Full », qui passe par le 443
+resource "google_compute_firewall" "allow_http_cloudflare" {
+  count = var.expose_http_via_cloudflare ? 1 : 0
+
+  project       = var.project_id
+  name          = "${var.name}-allow-http-cloudflare"
+  network       = var.network_id
+  direction     = "INGRESS"
+  source_ranges = var.cloudflare_ipv4_ranges
+  target_tags   = ["k3s"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["80"]
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.cloudflare_ipv4_ranges) > 0
+      error_message = "expose_http_via_cloudflare = true exige cloudflare_ipv4_ranges non vide."
+    }
+  }
+}
+
+# HTTPS (443) uniquement depuis Cloudflare (SSL « Full » : Cloudflare → origine en HTTPS)
+resource "google_compute_firewall" "allow_https_cloudflare" {
+  count = var.expose_https_via_cloudflare ? 1 : 0
+
+  project       = var.project_id
+  name          = "${var.name}-allow-https-cloudflare"
+  network       = var.network_id
+  direction     = "INGRESS"
+  source_ranges = var.cloudflare_ipv4_ranges
+  target_tags   = ["k3s"]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["443"]
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.cloudflare_ipv4_ranges) > 0
+      error_message = "expose_https_via_cloudflare = true exige cloudflare_ipv4_ranges non vide."
+    }
+  }
+}
+
 # SSH uniquement via IAP (jamais depuis Internet) ; l'API Kubernetes (6443) reste fermée
 resource "google_compute_firewall" "allow_iap" {
   project       = var.project_id
@@ -78,6 +127,18 @@ resource "google_project_iam_member" "logging" {
 resource "google_project_iam_member" "monitoring" {
   project = var.project_id
   role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.this.email}"
+}
+
+# ---------------------------------------------------------------
+# Lecture de tous les secrets du projet
+# Les ExternalSecrets (ClusterSecretStore gcp-secret-manager) lisent n'importe quel
+# secret du projet. Binding déjà créé à la main : iam_member est non autoritaire,
+# Terraform le reprend sans import.
+# ---------------------------------------------------------------
+resource "google_project_iam_member" "secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
   member  = "serviceAccount:${google_service_account.this.email}"
 }
 

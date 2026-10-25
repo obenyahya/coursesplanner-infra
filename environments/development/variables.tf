@@ -46,3 +46,15 @@ variable "persistent_volume_sizes" {
     keycloak = "1Gi"
   }
 }
+
+variable "expose_http_via_cloudflare" {
+  description = "Ouvre le port 80 de la VM k3s aux seules plages IP de Cloudflare"
+  type        = bool
+  default     = false
+}
+
+variable "expose_https_via_cloudflare" {
+  description = "Ouvre le port 443 de la VM k3s aux seules plages IP de Cloudflare (SSL « Full »)"
+  type        = bool
+  default     = false
+}
