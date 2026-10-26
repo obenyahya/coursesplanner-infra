@@ -3,3 +3,5 @@ region          = "europe-west9"
 environment     = "development"
 folder_id       = "706980146207"
 billing_account = "011C2B-EE7E18-0633E4"
+
+expose_http_via_cloudflare = true

@@ -5,6 +5,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 8.4"
     }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.5"
+    }
   }
 }
 
@@ -31,5 +35,6 @@ module "project" {
     "compute.googleapis.com",
     "iam.googleapis.com",
     "iap.googleapis.com",
+    "secretmanager.googleapis.com",
   ]
 }

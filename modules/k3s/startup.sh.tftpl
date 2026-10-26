@@ -1,0 +1,229 @@
+#!/bin/bash
+# Exécuté en root par l'agent Google à CHAQUE démarrage de la VM
+# (relance à la main : sudo google_metadata_script_runner startup).
+# Idempotent : réécrire un fichier identique ne change rien, k3s ne réapplique
+# un manifest que si son contenu a changé.
+set -euo pipefail
+
+MANIFESTS=/var/lib/rancher/k3s/server/manifests
+METADATA=http://metadata.google.internal/computeMetadata/v1
+
+# Écrit l'entrée standard dans $1 (droits $2) seulement si le contenu change.
+# Code retour 0 si le fichier a été modifié, 1 s'il était déjà à jour.
+install_if_changed() {
+  local dest=$1 mode=$2 tmp
+  mkdir -p "$(dirname "$dest")"
+  tmp=$(mktemp "$dest.XXXXXX")
+  cat >"$tmp"
+  if cmp -s "$tmp" "$dest"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  chmod "$mode" "$tmp"
+  mv -f "$tmp" "$dest"
+}
+
+# ---------------------------------------------------------------
+# 0. Disque de données (device_name "data") : formaté uniquement s'il est vierge,
+#    monté sur ${data_mount}, un dossier par PV hostPath.
+#    Appelée derrière « || » : set -e y est inactif, chaque étape vérifie son code retour.
+# ---------------------------------------------------------------
+DATA_DEV=/dev/disk/by-id/google-data
+DATA_MOUNT=${data_mount}
+
+setup_data_disk() {
+  local rc=0 uuid fstab_line
+
+  for _ in {1..30}; do
+    [[ -b $DATA_DEV ]] && break
+    sleep 2
+  done
+  [[ -b $DATA_DEV ]] || return 1
+
+  # blkid -p : 0 = signature trouvée (FS ou table de partitions), 2 = disque vierge
+  blkid -p "$DATA_DEV" >/dev/null 2>&1 || rc=$?
+  if ((rc == 2)); then
+    mkfs.ext4 -q -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard "$DATA_DEV" || return 1
+  elif ((rc != 0)); then
+    echo "blkid a renvoyé $rc sur $DATA_DEV : aucun formatage" >&2
+    return 1
+  fi
+
+  uuid=$(blkid -s UUID -o value "$DATA_DEV") && [[ -n $uuid ]] || return 1
+  fstab_line="UUID=$uuid $DATA_MOUNT ext4 discard,defaults,nofail 0 2"
+  if ! grep -qxF "$fstab_line" /etc/fstab; then
+    sed -i "\#[[:space:]]$DATA_MOUNT[[:space:]]#d" /etc/fstab || return 1
+    echo "$fstab_line" >>/etc/fstab || return 1
+    systemctl daemon-reload
+  fi
+
+  mkdir -p "$DATA_MOUNT" || return 1
+  mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT" || return 1
+
+  # Dossiers créés seulement une fois le disque monté (jamais sur le disque de boot)
+%{ for name, v in data_volumes ~}
+  mkdir -p "$DATA_MOUNT/${name}" && chown ${v.owner} "$DATA_MOUNT/${name}" && chmod 700 "$DATA_MOUNT/${name}" || return 1
+%{ endfor ~}
+}
+
+setup_data_disk ||
+  echo "Disque de données non monté sur $DATA_MOUNT : les PV hostPath resteront inutilisables" >&2
+
+# ---------------------------------------------------------------
+# 1. Credential provider kubelet : containerd tire les images *.pkg.dev avec le
+#    compte de service de la VM (jeton du serveur de métadonnées), sans imagePullSecrets.
+#    Installé avant la config k3s : kubelet refuse de démarrer si le binaire manque.
+# ---------------------------------------------------------------
+CP_BIN_DIR=/var/lib/rancher/credentialprovider/bin
+CP_CONFIG=/etc/rancher/k3s/credential-provider.yaml
+AUTH_PROVIDER_SHA256=${auth_provider_gcp_sha256}
+
+if ! echo "$AUTH_PROVIDER_SHA256  $CP_BIN_DIR/auth-provider-gcp" | sha256sum -c --status 2>/dev/null; then
+  mkdir -p "$CP_BIN_DIR"
+  tmp=$(mktemp "$CP_BIN_DIR/.auth-provider-gcp.XXXXXX")
+  curl -sSfL --retry 5 -o "$tmp" \
+    "https://storage.googleapis.com/k8s-staging-cloud-provider-gcp/auth-provider-gcp/linux-amd64/${auth_provider_gcp_version}"
+  echo "$AUTH_PROVIDER_SHA256  $tmp" | sha256sum -c --status || {
+    rm -f "$tmp"
+    echo "Somme SHA-256 de auth-provider-gcp invalide" >&2
+    exit 1
+  }
+  chmod 755 "$tmp"
+  mv -f "$tmp" "$CP_BIN_DIR/auth-provider-gcp"
+fi
+
+RESTART_K3S=false
+if install_if_changed "$CP_CONFIG" 600 <<'EOF'; then RESTART_K3S=true; fi
+apiVersion: kubelet.config.k8s.io/v1
+kind: CredentialProviderConfig
+providers:
+  - name: auth-provider-gcp
+    apiVersion: credentialprovider.kubelet.k8s.io/v1
+    matchImages:
+      - "*.pkg.dev"
+    defaultCacheDuration: 1m
+    args:
+      - get-credentials
+EOF
+
+# ---------------------------------------------------------------
+# 2. Config k3s : nom et IP du nœud fixés (indépendants du hostname renvoyé par GCP),
+#    Traefik désactivé, Secrets chiffrés au repos, credential provider,
+#    nettoyage des images inutilisées dès 70 % de disque, jusqu'à 50 %.
+#    k3s redémarré seulement si une config a changé et qu'il est déjà installé.
+# ---------------------------------------------------------------
+K3S_CONFIG=/etc/rancher/k3s/config.yaml
+NODE_IP=$(curl -sSf --retry 5 --retry-connrefused -H "Metadata-Flavor: Google" \
+  "$METADATA/instance/network-interfaces/0/ip")
+if install_if_changed "$K3S_CONFIG" 600 <<EOF; then RESTART_K3S=true; fi
+%{ if node_name != null ~}
+node-name: ${node_name}
+%{ endif ~}
+node-ip: $NODE_IP
+disable:
+  - traefik
+secrets-encryption: true
+kubelet-arg:
+  - image-credential-provider-config=$CP_CONFIG
+  - image-credential-provider-bin-dir=$CP_BIN_DIR
+  - image-gc-high-threshold=70
+  - image-gc-low-threshold=50
+EOF
+
+if $RESTART_K3S && command -v k3s >/dev/null 2>&1; then
+  systemctl restart k3s
+fi
+
+# ---------------------------------------------------------------
+# a. k3s, installé une seule fois
+# ---------------------------------------------------------------
+if ! command -v k3s >/dev/null 2>&1; then
+  curl -sfL https://get.k3s.io | INSTALL_K3S_CHANNEL=stable sh -s - server \
+    --write-kubeconfig-mode 600
+fi
+mkdir -p "$MANIFESTS"
+
+# Valeur du serveur de métadonnées (attributs de la VM, jeton du compte de service)
+metadata() {
+  curl -sSf --retry 5 --retry-connrefused -H "Metadata-Flavor: Google" "$METADATA/$1"
+}
+
+# Écriture atomique de la sortie d'une commande dans un manifest, en 600.
+# Le fichier temporaire (".nom.XXXXXX", sans extension .yaml) est ignoré par k3s ;
+# si la commande échoue, le manifest existant est conservé tel quel.
+write_manifest() {
+  local dest=$1 tmp
+  shift
+  tmp=$(mktemp "$MANIFESTS/.$(basename "$dest").XXXXXX")
+  if "$@" >"$tmp"; then
+    mv -f "$tmp" "$dest"
+  else
+    rm -f "$tmp"
+    return 1
+  fi
+}
+
+# ---------------------------------------------------------------
+# b. Flux : manifest officiel de la version épinglée par Terraform
+# ---------------------------------------------------------------
+FLUX_VERSION=$(metadata instance/attributes/flux-version)
+write_manifest "$MANIFESTS/flux-install.yaml" \
+  curl -sSfL --retry 5 "https://github.com/fluxcd/flux2/releases/download/v$${FLUX_VERSION}/install.yaml" ||
+  echo "Téléchargement de Flux v$${FLUX_VERSION} impossible, manifest précédent conservé" >&2
+
+# ---------------------------------------------------------------
+# c. Plateforme : manifests rendus par Terraform (namespace, External Secrets,
+#    PersistentVolumes hostPath, GitRepository + Kustomization Flux)
+# ---------------------------------------------------------------
+write_manifest "$MANIFESTS/platform.yaml" metadata instance/attributes/k3s-manifests
+
+# ---------------------------------------------------------------
+# d. Clé de déploiement Flux : Secret Manager → Secret Kubernetes.
+#    La clé ne passe jamais dans une variable affichée ni dans les logs.
+# ---------------------------------------------------------------
+deploy_key_secret() {
+  local project secret token_json token response key known_hosts line
+
+  project=$(metadata project/project-id) || return 1
+  secret=$(metadata instance/attributes/flux-deploy-key-secret) || return 1
+  token_json=$(metadata instance/service-accounts/default/token) || return 1
+  [[ $token_json =~ \"access_token\"\ *:\ *\"([^\"]+)\" ]] || return 1
+  token=$${BASH_REMATCH[1]}
+
+  # En-tête lu sur l'entrée standard : le jeton n'apparaît pas dans la liste des processus
+  response=$(curl -sSf --retry 3 -H @- \
+    "https://secretmanager.googleapis.com/v1/projects/$${project}/secrets/$${secret}/versions/latest:access" \
+    <<<"Authorization: Bearer $${token}") || {
+    echo "Secret $${secret} illisible (aucune version ?), Secret Kubernetes non mis à jour" >&2
+    return 1
+  }
+  # payload.data est déjà en base64 : recopié tel quel dans "data", jamais décodé
+  [[ $response =~ \"data\"\ *:\ *\"([^\"]+)\" ]] || return 1
+  key=$${BASH_REMATCH[1]}
+  # Échappements JSON possibles dans du base64 ("=" en =, "/" en \/)
+  key=$${key//\\u003d/=}
+  key=$${key//\\\//\/}
+
+  known_hosts=$(ssh-keyscan -t ed25519,ecdsa,rsa github.com 2>/dev/null) || return 1
+  [[ -n $known_hosts ]] || return 1
+
+  cat <<EOF
+# Généré par startup.sh depuis Secret Manager ($${secret}) : ne pas modifier.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coursesplanner-app-deploy-key
+  namespace: flux-system
+type: Opaque
+data:
+  identity: $${key}
+stringData:
+  known_hosts: |
+EOF
+  while IFS= read -r line; do
+    printf '    %s\n' "$line"
+  done <<<"$known_hosts"
+}
+
+write_manifest "$MANIFESTS/flux-app-deploy-key.yaml" deploy_key_secret ||
+  echo "Clé de déploiement Flux non écrite : Flux ne pourra pas cloner coursesplanner-docker" >&2

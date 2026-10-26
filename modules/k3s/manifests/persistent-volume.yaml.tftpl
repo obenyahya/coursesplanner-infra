@@ -1,0 +1,19 @@
+# PV statique sur le disque de données (/mnt/data), pré-lié à la PVC de l'application.
+# Retain : supprimer la PVC ne supprime jamais les données.
+# type Directory : le pod échoue si le disque n'est pas monté, au lieu d'écrire sur le disque de boot.
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pv-${name}
+spec:
+  storageClassName: manual
+  capacity:
+    storage: ${size}
+  accessModes: ["ReadWriteOnce"]
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: ${path}
+    type: Directory
+  claimRef:
+    namespace: coursesplanner
+    name: ${claim}
